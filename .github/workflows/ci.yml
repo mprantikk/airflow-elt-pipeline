@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: warehouse
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-retries 10
+
+    env:
+      WAREHOUSE_DSN: postgresql://postgres:postgres@localhost:5432/warehouse
+      AIRFLOW_HOME: ${{ github.workspace }}/.airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/dags
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Airflow (with official constraints)
+        run: |
+          pip install -r requirements.txt \
+            --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.10.5/constraints-3.11.txt
+
+      - name: Init Airflow metadata DB
+        run: airflow db migrate
+
+      - name: Tests (DAG integrity + end-to-end task runs)
+        run: pytest -v
+
+      - name: Run the whole DAG for one day
+        run: airflow dags test claims_daily_elt 2025-12-05
